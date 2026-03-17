@@ -1,457 +1,441 @@
-import React, { useState, useCallback, useRef } from 'react'
-import styled, { createGlobalStyle, keyframes } from 'styled-components'
+import React, { useState, useCallback } from 'react'
 
-const GlobalStyle = createGlobalStyle`
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-`
-
-/* ─── Types ─────────────────────────────────────────── */
+/* ─── Types ─────────────────────────────────────── */
 interface ImageFile {
   path: string
   name: string
-  ext: string
-  size: number
+  article: string
+  itemNumber: string
   dataUrl?: string
-  loading?: boolean
-  error?: boolean
+  loading: boolean
 }
 
-interface ScanResult {
-  success: boolean
-  files: string[]
-  dirPath: string
-  error?: string
+interface SheetItem {
+  itemNumber: string
+  articles: string[]
+  tags: string[]
+  notes: string
+  imagePreviews: Record<string, string>
 }
 
-/* ─── Styled Components ─────────────────────────────── */
+type Step = 'setup' | 'preview' | 'exporting' | 'done'
 
-const Root = styled.div`
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  background: var(--bg);
-`
+/* ─── Helpers ───────────────────────────────────── */
+function parseFilename(filename: string): { itemNumber: string; article: string } | null {
+  // Format: 01_102543-004A.jpg — item_article.ext
+  // Also allow: 01_102543-004A_extra.jpg (take first two parts)
+  const base = filename.replace(/\.[^.]+$/, '')
+  const match = base.match(/^(\d+)_(.+)$/)
+  if (!match) return null
+  return { itemNumber: match[1].replace(/^0+/, '') || '0', article: match[2] }
+}
 
-const TitleBar = styled.div`
-  height: 38px;
-  -webkit-app-region: drag;
-  display: flex;
-  align-items: center;
-  padding: 0 80px 0 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-`
-
-const AppTitle = styled.span`
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-muted);
-  letter-spacing: 0.4px;
-`
-
-const Content = styled.div`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 24px;
-  gap: 20px;
-`
-
-const spin = keyframes`
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-`
-
-const pulse = keyframes`
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-`
-
-const DropZone = styled.div<{ $active: boolean; $hasFiles: boolean }>`
-  border: 2px dashed ${p => p.$active ? 'var(--accent)' : p.$hasFiles ? 'var(--border)' : 'var(--border)'};
-  border-radius: var(--radius);
-  padding: ${p => p.$hasFiles ? '16px 24px' : '48px 24px'};
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  cursor: pointer;
-  background: ${p => p.$active ? 'rgba(99,102,241,0.08)' : 'var(--surface)'};
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-  
-  &:hover {
-    border-color: var(--accent);
-    background: rgba(99,102,241,0.05);
-  }
-`
-
-const DropIcon = styled.div<{ $hasFiles: boolean }>`
-  font-size: ${p => p.$hasFiles ? '28px' : '44px'};
-  line-height: 1;
-  flex-shrink: 0;
-  transition: font-size 0.2s;
-`
-
-const DropText = styled.div`
-  flex: 1;
-`
-
-const DropTitle = styled.div<{ $hasFiles: boolean }>`
-  font-size: ${p => p.$hasFiles ? '14px' : '18px'};
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 4px;
-  transition: font-size 0.2s;
-`
-
-const DropSub = styled.div`
-  font-size: 13px;
-  color: var(--text-muted);
-`
-
-const BrowseBtn = styled.button`
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  font-size: 13px;
-  padding: 8px 16px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.15s;
-  -webkit-app-region: no-drag;
-  
-  &:hover { background: var(--border); }
-`
-
-const StatsBar = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  font-size: 13px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-`
-
-const Stat = styled.span`
-  color: var(--text);
-  font-weight: 500;
-`
-
-const Grid = styled.div`
-  flex: 1;
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 12px;
-  padding-right: 4px;
-
-  &::-webkit-scrollbar { width: 6px; }
-  &::-webkit-scrollbar-track { background: transparent; }
-  &::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-`
-
-const Card = styled.div<{ $loading?: boolean }>`
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  animation: ${p => p.$loading ? pulse : 'none'} 1.5s infinite;
-  transition: transform 0.15s, border-color 0.15s;
-  
-  &:hover {
-    transform: translateY(-2px);
-    border-color: var(--accent);
-  }
-`
-
-const ImageWrap = styled.div`
-  width: 100%;
-  aspect-ratio: 1;
-  background: var(--surface2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  position: relative;
-`
-
-const Img = styled.img`
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-`
-
-const ImagePlaceholder = styled.div`
-  font-size: 32px;
-`
-
-const CardInfo = styled.div`
-  padding: 8px 10px;
-`
-
-const CardName = styled.div`
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 2px;
-`
-
-const CardMeta = styled.div`
-  font-size: 10px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-`
-
-const Toolbar = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-`
-
-const CreateBtn = styled.button<{ $disabled: boolean }>`
-  background: ${p => p.$disabled ? 'var(--surface2)' : 'var(--accent)'};
-  color: ${p => p.$disabled ? 'var(--text-muted)' : '#fff'};
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  padding: 10px 24px;
-  cursor: ${p => p.$disabled ? 'not-allowed' : 'pointer'};
-  transition: background 0.15s, transform 0.1s;
-  
-  &:hover:not(:disabled) {
-    background: var(--accent-hover);
-    transform: translateY(-1px);
-  }
-`
-
-const ClearBtn = styled.button`
-  background: transparent;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 13px;
-  padding: 10px 16px;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
-  
-  &:hover { color: var(--text); border-color: var(--text-muted); }
-`
-
-const EmptyState = styled.div`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  gap: 8px;
-  font-size: 14px;
-`
-
-/* ─── Helpers ────────────────────────────────────────── */
+function basename(p: string) { return p.split(/[/\\]/).pop() || p }
 function formatBytes(b: number) {
   if (b < 1024) return `${b} B`
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`
   return `${(b / 1024 / 1024).toFixed(1)} MB`
 }
 
-function basename(p: string) {
-  return p.split(/[/\\]/).pop() || p
+/* ─── Styles (inline for zero deps) ────────────── */
+const S = {
+  root: { display:'flex', flexDirection:'column' as const, height:'100vh', background:'#0f0f11', color:'#f4f4f5', fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif', fontSize:14, overflow:'hidden' },
+  titleBar: { height:38, WebkitAppRegion:'drag' as any, background:'#141417', borderBottom:'1px solid #2a2a30', display:'flex', alignItems:'center', padding:'0 80px 0 16px', flexShrink:0 },
+  titleText: { fontSize:13, fontWeight:600, color:'#71717a', letterSpacing:'0.4px' },
+  body: { flex:1, display:'flex', overflow:'hidden' },
+
+  // Sidebar
+  sidebar: { width:280, flexShrink:0, background:'#141417', borderRight:'1px solid #2a2a30', display:'flex', flexDirection:'column' as const, padding:20, gap:16, overflow:'auto' },
+  sideSection: { display:'flex', flexDirection:'column' as const, gap:8 },
+  sideLabel: { fontSize:11, fontWeight:600, color:'#6b7280', textTransform:'uppercase' as const, letterSpacing:'0.8px' },
+  
+  // Drop zones
+  dropZone: (active: boolean, filled: boolean) => ({
+    border: `2px dashed ${active ? '#6366f1' : filled ? '#22c55e' : '#2e2e35'}`,
+    borderRadius: 10,
+    padding: '12px 14px',
+    cursor: 'pointer',
+    background: active ? 'rgba(99,102,241,0.08)' : filled ? 'rgba(34,197,94,0.05)' : '#1a1a1f',
+    transition: 'all 0.2s',
+    display:'flex', alignItems:'center', gap:10,
+  }),
+  dropIcon: { fontSize:20, flexShrink:0 },
+  dropInfo: { flex:1, minWidth:0 },
+  dropTitle: (filled: boolean) => ({ fontSize:12, fontWeight:600, color: filled ? '#22c55e' : '#f4f4f5', whiteSpace:'nowrap' as const, overflow:'hidden', textOverflow:'ellipsis' }),
+  dropSub: { fontSize:11, color:'#6b7280', marginTop:2 },
+
+  // Buttons
+  btn: (variant: 'primary'|'ghost'|'danger' = 'primary', disabled = false) => ({
+    background: disabled ? '#1f1f26' : variant === 'primary' ? '#6366f1' : variant === 'ghost' ? 'transparent' : '#dc2626',
+    color: disabled ? '#4b5563' : '#fff',
+    border: variant === 'ghost' ? '1px solid #2e2e35' : 'none',
+    borderRadius: 8,
+    padding: '9px 18px',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    transition: 'background 0.15s',
+    WebkitAppRegion: 'no-drag',
+  }),
+
+  // Main content
+  main: { flex:1, display:'flex', flexDirection:'column' as const, overflow:'hidden' },
+  toolbar: { padding:'14px 20px', borderBottom:'1px solid #2a2a30', display:'flex', alignItems:'center', gap:12, flexShrink:0, background:'#141417' },
+  stats: { flex:1, fontSize:12, color:'#6b7280', display:'flex', gap:16 },
+  statVal: { color:'#e5e7eb', fontWeight:600 },
+
+  // Table
+  tableWrap: { flex:1, overflow:'auto', padding:'0 0 20px 0' },
+  table: { width:'100%', borderCollapse:'collapse' as const, minWidth:800 },
+  th: { padding:'10px 14px', fontSize:11, fontWeight:600, color:'#9ca3af', textAlign:'left' as const, background:'#141417', borderBottom:'1px solid #2a2a30', position:'sticky' as const, top:0, zIndex:1, whiteSpace:'nowrap' as const },
+  itemRow: (alt: boolean) => ({ background: alt ? '#1a1a1f' : '#161619', borderBottom:'1px solid #22222a' }),
+  td: { padding:'10px 14px', verticalAlign:'top' as const, fontSize:13, color:'#e5e7eb', lineHeight:1.4 },
+  tdNum: { padding:'10px 14px', verticalAlign:'middle' as const, fontSize:18, fontWeight:700, color:'#6366f1', textAlign:'center' as const, width:60 },
+  
+  // Tag badges
+  tagBadge: { display:'inline-block', background:'rgba(99,102,241,0.12)', color:'#818cf8', borderRadius:4, padding:'2px 6px', fontSize:11, marginRight:4, marginBottom:3 },
+  
+  // Image thumbs
+  thumbRow: { display:'flex', gap:6, flexWrap:'wrap' as const },
+  thumb: { width:52, height:52, borderRadius:6, objectFit:'cover' as const, border:'1px solid #2e2e35', background:'#1f1f26', display:'flex', alignItems:'center', justifyContent:'center', fontSize:18, overflow:'hidden' },
+  
+  // Empty state
+  empty: { flex:1, display:'flex', flexDirection:'column' as const, alignItems:'center', justifyContent:'center', color:'#4b5563', gap:12 },
+  emptyIcon: { fontSize:56 },
+  emptyTitle: { fontSize:16, fontWeight:600, color:'#6b7280' },
+  emptyDesc: { fontSize:13, color:'#4b5563', maxWidth:340, textAlign:'center' as const, lineHeight:1.6 },
+
+  // Notes input
+  notesInput: { background:'#1a1a1f', border:'1px solid #2e2e35', borderRadius:6, color:'#e5e7eb', fontSize:12, padding:'4px 8px', width:'100%', fontFamily:'inherit', resize:'vertical' as const },
+
+  // Status badge
+  badge: (ok: boolean) => ({ display:'inline-flex', alignItems:'center', gap:4, padding:'3px 8px', borderRadius:999, fontSize:11, fontWeight:600, background: ok ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)', color: ok ? '#22c55e' : '#ef4444' }),
 }
 
-function ext(p: string) {
-  const m = p.match(/\.([^.]+)$/)
-  return m ? m[1].toUpperCase() : '?'
-}
-
-/* ─── Component ──────────────────────────────────────── */
+/* ─── Component ─────────────────────────────────── */
 export default function App() {
-  const [images, setImages] = useState<ImageFile[]>([])
   const [dirPath, setDirPath] = useState<string | null>(null)
-  const [isDragging, setIsDragging] = useState(false)
+  const [tagsPath, setTagsPath] = useState<string | null>(null)
+  const [tagsGroups, setTagsGroups] = useState<Record<number, string[]>>({})
+  const [images, setImages] = useState<ImageFile[]>([])
+  const [items, setItems] = useState<SheetItem[]>([])
+  const [step, setStep] = useState<Step>('setup')
+  const [draggingDir, setDraggingDir] = useState(false)
+  const [draggingTags, setDraggingTags] = useState(false)
+  const [exportMsg, setExportMsg] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
-  const dropRef = useRef<HTMLDivElement>(null)
+  const [totalSize, setTotalSize] = useState(0)
 
-  const processDirectory = useCallback(async (path: string) => {
-    setScanning(true)
-    setImages([])
-    setDirPath(path)
-
-    const result: ScanResult = await window.electronAPI.scanDirectory(path)
-    if (!result.success || result.files.length === 0) {
-      setScanning(false)
-      setImages([])
-      return
+  const buildSheetItems = useCallback((imgs: ImageFile[], groups: Record<number, string[]>): SheetItem[] => {
+    const map: Record<string, { articles: string[]; imagePreviews: Record<string, string> }> = {}
+    for (const img of imgs) {
+      if (!map[img.itemNumber]) map[img.itemNumber] = { articles: [], imagePreviews: {} }
+      if (!map[img.itemNumber].articles.includes(img.article)) {
+        map[img.itemNumber].articles.push(img.article)
+      }
+      if (img.dataUrl) map[img.itemNumber].imagePreviews[img.article] = img.dataUrl
     }
-
-    // Init all cards immediately
-    const initial: ImageFile[] = result.files.map(fp => ({
-      path: fp,
-      name: basename(fp),
-      ext: ext(fp),
-      size: 0,
-      loading: true,
-    }))
-    setImages(initial)
-    setScanning(false)
-
-    // Load previews in batches of 8
-    const BATCH = 8
-    for (let i = 0; i < result.files.length; i += BATCH) {
-      const batch = result.files.slice(i, i + BATCH)
-      const loaded = await Promise.all(
-        batch.map(fp => window.electronAPI.readImage(fp))
-      )
-      setImages(prev =>
-        prev.map((img, idx) => {
-          const batchIdx = idx - i
-          if (batchIdx < 0 || batchIdx >= batch.length) return img
-          const res = loaded[batchIdx]
-          return {
-            ...img,
-            dataUrl: res.success ? res.dataUrl : undefined,
-            size: res.size || 0,
-            loading: false,
-            error: !res.success,
-          }
-        })
-      )
-    }
+    return Object.keys(map)
+      .sort((a, b) => parseInt(a) - parseInt(b))
+      .map(num => ({
+        itemNumber: num,
+        articles: map[num].articles,
+        tags: groups[parseInt(num)] || [],
+        notes: '',
+        imagePreviews: map[num].imagePreviews,
+      }))
   }, [])
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-    const item = e.dataTransfer.items?.[0]
-    if (!item) return
-    const entry = item.webkitGetAsEntry?.()
-    if (entry?.isDirectory) {
-      // @ts-ignore
-      processDirectory(e.dataTransfer.files[0].path)
-    } else if (item.kind === 'file') {
-      const file = item.getAsFile()
-      // @ts-ignore
-      if (file?.path) processDirectory(file.path)
+  const loadDirectory = useCallback(async (dirPathIn: string) => {
+    setScanning(true)
+    setImages([])
+    setItems([])
+    setDirPath(dirPathIn)
+    
+    const result = await window.electronAPI.scanDirectory(dirPathIn)
+    if (!result.success) { setScanning(false); return }
+
+    const parsed: ImageFile[] = result.files
+      .map(fp => {
+        const parsed = parseFilename(basename(fp))
+        if (!parsed) return null
+        return { path: fp, name: basename(fp), article: parsed.article, itemNumber: parsed.itemNumber, loading: true }
+      })
+      .filter(Boolean) as ImageFile[]
+
+    setImages(parsed)
+    setScanning(false)
+
+    // Load images in background
+    let size = 0
+    const BATCH = 6
+    const loaded = [...parsed]
+    for (let i = 0; i < parsed.length; i += BATCH) {
+      const batch = parsed.slice(i, i + BATCH)
+      const results = await Promise.all(batch.map(img => window.electronAPI.readImage(img.path)))
+      results.forEach((r, bi) => {
+        const idx = i + bi
+        loaded[idx] = { ...loaded[idx], dataUrl: r.dataUrl, loading: false }
+        if (r.size) size += r.size
+      })
+      setImages([...loaded])
+      setTotalSize(size)
     }
-  }, [processDirectory])
+    
+    setItems(prev => {
+      const si = buildSheetItems(loaded, tagsGroups)
+      // Preserve any notes already typed
+      return si.map(item => {
+        const existing = prev.find(p => p.itemNumber === item.itemNumber)
+        return { ...item, notes: existing?.notes || '' }
+      })
+    })
+    if (loaded.length > 0) setStep('preview')
+  }, [tagsGroups, buildSheetItems])
 
-  const handleBrowse = useCallback(async () => {
-    const path = await window.electronAPI.pickDirectory()
-    if (path) processDirectory(path)
-  }, [processDirectory])
+  const loadTagsFile = useCallback(async (fp: string) => {
+    setTagsPath(fp)
+    const result = await window.electronAPI.parseTagsFile(fp)
+    if (result.success) {
+      setTagsGroups(result.groups)
+      // Re-build items with new tags if we already have images
+      if (images.length > 0) {
+        setItems(prev => {
+          const si = buildSheetItems(images, result.groups)
+          return si.map(item => {
+            const existing = prev.find(p => p.itemNumber === item.itemNumber)
+            return { ...item, notes: existing?.notes || '' }
+          })
+        })
+      }
+    }
+  }, [images, buildSheetItems])
 
-  const totalSize = images.reduce((a, b) => a + b.size, 0)
-  const hasFiles = images.length > 0
+  const handleDirDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault(); setDraggingDir(false)
+    const file = e.dataTransfer.files[0]
+    if (file) loadDirectory((file as any).path)
+  }, [loadDirectory])
+
+  const handleTagsDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault(); setDraggingTags(false)
+    const file = e.dataTransfer.files[0]
+    if (file) loadTagsFile((file as any).path)
+  }, [loadTagsFile])
+
+  const handleExport = useCallback(async () => {
+    setStep('exporting')
+    setExportMsg(null)
+    const exportItems = items.map(item => ({
+      itemNumber: item.itemNumber,
+      articles: item.articles,
+      tags: item.tags,
+      notes: item.notes,
+    }))
+    const result = await window.electronAPI.exportExcel(exportItems)
+    if (result.canceled) { setStep('preview'); return }
+    if (result.success) {
+      setExportMsg(`✅ Saved: ${result.path?.split('/').pop()}`)
+      setStep('done')
+    } else {
+      setExportMsg(`❌ Error: ${result.error}`)
+      setStep('preview')
+    }
+  }, [items])
+
+  const updateNotes = (itemNumber: string, notes: string) => {
+    setItems(prev => prev.map(i => i.itemNumber === itemNumber ? { ...i, notes } : i))
+  }
+
+  const tagsLoaded = Object.keys(tagsGroups).length > 0
+  const canExport = items.length > 0
 
   return (
-    <Root>
-      <TitleBar>
-        <AppTitle>SheetCraft</AppTitle>
-      </TitleBar>
+    <div style={S.root}>
+      <div style={S.titleBar}>
+        <span style={S.titleText}>SheetCraft</span>
+      </div>
+      <div style={S.body}>
 
-      <Content>
-        {/* Drop zone */}
-        <DropZone
-          ref={dropRef}
-          $active={isDragging}
-          $hasFiles={hasFiles}
-          onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={handleDrop}
-          onClick={handleBrowse}
-        >
-          <DropIcon $hasFiles={hasFiles}>
-            {isDragging ? '📂' : hasFiles ? '🖼️' : '📁'}
-          </DropIcon>
-          <DropText>
-            <DropTitle $hasFiles={hasFiles}>
-              {isDragging
-                ? 'Release to scan'
-                : hasFiles
-                ? dirPath?.split('/').slice(-2).join('/')
-                : 'Drop a folder here'}
-            </DropTitle>
-            <DropSub>
-              {hasFiles
-                ? `${images.length} images found`
-                : 'or click to browse — scans all subfolders'}
-            </DropSub>
-          </DropText>
-          <BrowseBtn onClick={e => { e.stopPropagation(); handleBrowse() }}>
-            Browse…
-          </BrowseBtn>
-        </DropZone>
-
-        {/* Stats + actions */}
-        {hasFiles && (
-          <Toolbar>
-            <StatsBar>
-              <span>
-                <Stat>{images.length}</Stat> images
-              </span>
-              <span>·</span>
-              <span>
-                <Stat>{formatBytes(totalSize)}</Stat> total
-              </span>
-              {scanning && <span style={{ color: 'var(--accent)' }}>Scanning…</span>}
-            </StatsBar>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <ClearBtn onClick={() => { setImages([]); setDirPath(null) }}>
-                Clear
-              </ClearBtn>
-              <CreateBtn
-                $disabled={images.length === 0}
-                disabled={images.length === 0}
-                onClick={() => alert('Excel export coming soon!')}
-              >
-                Create Excel Sheet →
-              </CreateBtn>
+        {/* Sidebar */}
+        <div style={S.sidebar}>
+          <div style={S.sideSection}>
+            <div style={S.sideLabel}>1. Image Folder</div>
+            <div
+              style={S.dropZone(draggingDir, !!dirPath)}
+              onDragOver={e => { e.preventDefault(); setDraggingDir(true) }}
+              onDragLeave={() => setDraggingDir(false)}
+              onDrop={handleDirDrop}
+              onClick={async () => {
+                const p = await window.electronAPI.pickDirectory()
+                if (p) loadDirectory(p)
+              }}
+            >
+              <span style={S.dropIcon}>{draggingDir ? '📂' : dirPath ? '✅' : '📁'}</span>
+              <div style={S.dropInfo}>
+                <div style={S.dropTitle(!!dirPath)}>
+                  {dirPath ? dirPath.split('/').slice(-2).join('/') : 'Drop folder…'}
+                </div>
+                <div style={S.dropSub}>
+                  {scanning ? 'Scanning…' : images.length > 0 ? `${images.length} images · ${formatBytes(totalSize)}` : 'click or drag'}
+                </div>
+              </div>
             </div>
-          </Toolbar>
-        )}
+          </div>
 
-        {/* Image grid */}
-        {hasFiles ? (
-          <Grid>
-            {images.map(img => (
-              <Card key={img.path} $loading={img.loading}>
-                <ImageWrap>
-                  {img.loading ? (
-                    <ImagePlaceholder>⏳</ImagePlaceholder>
-                  ) : img.error || !img.dataUrl ? (
-                    <ImagePlaceholder>⚠️</ImagePlaceholder>
-                  ) : (
-                    <Img src={img.dataUrl} alt={img.name} />
-                  )}
-                </ImageWrap>
-                <CardInfo>
-                  <CardName title={img.name}>{img.name}</CardName>
-                  <CardMeta>
-                    {img.ext} {img.size ? `· ${formatBytes(img.size)}` : ''}
-                  </CardMeta>
-                </CardInfo>
-              </Card>
-            ))}
-          </Grid>
-        ) : (
-          <EmptyState>
-            <span style={{ fontSize: 48 }}>🗂️</span>
-            <span>Drop or browse a folder to see your images</span>
-            <span style={{ fontSize: 12 }}>Supports JPG, PNG, GIF, WebP, SVG, BMP, TIFF</span>
-          </EmptyState>
-        )}
-      </Content>
-    </Root>
+          <div style={S.sideSection}>
+            <div style={S.sideLabel}>2. Tags File</div>
+            <div
+              style={S.dropZone(draggingTags, !!tagsPath)}
+              onDragOver={e => { e.preventDefault(); setDraggingTags(true) }}
+              onDragLeave={() => setDraggingTags(false)}
+              onDrop={handleTagsDrop}
+              onClick={async () => {
+                const p = await window.electronAPI.pickFile({ filters: [{ name: 'Tags file', extensions: ['docx','txt'] }] })
+                if (p) loadTagsFile(p)
+              }}
+            >
+              <span style={S.dropIcon}>{draggingTags ? '📝' : tagsPath ? '✅' : '🏷️'}</span>
+              <div style={S.dropInfo}>
+                <div style={S.dropTitle(!!tagsPath)}>
+                  {tagsPath ? basename(tagsPath) : 'Drop tags file…'}
+                </div>
+                <div style={S.dropSub}>
+                  {tagsLoaded ? `${Object.keys(tagsGroups).length} item groups loaded` : '.docx or .txt'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Status */}
+          {items.length > 0 && (
+            <div style={S.sideSection}>
+              <div style={S.sideLabel}>Status</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                <div style={S.badge(true)}>✓ {items.length} items detected</div>
+                <div style={S.badge(tagsLoaded)}>
+                  {tagsLoaded ? `✓ Tags loaded` : '⚠ No tags file'}
+                </div>
+                {items.filter(i => i.tags.length === 0).length > 0 && (
+                  <div style={S.badge(false)}>
+                    {items.filter(i => i.tags.length === 0).length} items missing tags
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Export button */}
+          <div style={{ marginTop:'auto', display:'flex', flexDirection:'column', gap:8 }}>
+            {exportMsg && (
+              <div style={{ fontSize:12, color: exportMsg.startsWith('✅') ? '#22c55e' : '#ef4444', background: exportMsg.startsWith('✅') ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', padding:'8px 10px', borderRadius:8, lineHeight:1.4 }}>
+                {exportMsg}
+              </div>
+            )}
+            <button
+              style={S.btn('primary', !canExport || step === 'exporting')}
+              disabled={!canExport || step === 'exporting'}
+              onClick={handleExport}
+            >
+              {step === 'exporting' ? '⏳ Exporting…' : '📊 Export Excel Sheet'}
+            </button>
+            {(dirPath || tagsPath) && (
+              <button style={S.btn('ghost')} onClick={() => {
+                setDirPath(null); setTagsPath(null); setTagsGroups({}); setImages([]); setItems([]); setStep('setup'); setExportMsg(null); setTotalSize(0)
+              }}>
+                Clear all
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Main content */}
+        <div style={S.main}>
+          {items.length === 0 ? (
+            <div style={S.empty}>
+              <div style={S.emptyIcon}>🗂️</div>
+              <div style={S.emptyTitle}>No items yet</div>
+              <div style={S.emptyDesc}>
+                Drop an image folder and a tags file in the sidebar.<br/>
+                Images should be named like <code style={{ background:'#1f1f26', padding:'1px 5px', borderRadius:4 }}>01_102543-004A.jpg</code>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={S.toolbar}>
+                <div style={S.stats}>
+                  <span><span style={S.statVal}>{items.length}</span> items</span>
+                  <span><span style={S.statVal}>{images.length}</span> images</span>
+                  <span><span style={S.statVal}>{items.reduce((a,i) => a + i.articles.length, 0)}</span> articles</span>
+                  {tagsLoaded && <span><span style={S.statVal}>{items.filter(i => i.tags.length > 0).length}</span> with tags</span>}
+                </div>
+              </div>
+              <div style={S.tableWrap}>
+                <table style={S.table}>
+                  <thead>
+                    <tr>
+                      <th style={S.th}>#</th>
+                      <th style={S.th}>Tags / Taglines</th>
+                      <th style={S.th}>Articles</th>
+                      <th style={S.th}>Photos</th>
+                      <th style={S.th}>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item, idx) => (
+                      <tr key={item.itemNumber} style={S.itemRow(idx % 2 === 1)}>
+                        <td style={S.tdNum}>{item.itemNumber}</td>
+                        <td style={S.td}>
+                          {item.tags.length > 0 ? (
+                            <div style={{ display:'flex', flexWrap:'wrap' }}>
+                              {item.tags.map((t, i) => (
+                                <span key={i} style={S.tagBadge}>{t}</span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color:'#4b5563', fontSize:12 }}>—</span>
+                          )}
+                        </td>
+                        <td style={S.td}>
+                          <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                            {item.articles.map((a, i) => (
+                              <span key={a} style={{ fontSize:12, color:'#d1d5db' }}>
+                                <span style={{ color:'#6b7280', marginRight:6 }}>P{i+1}</span>{a}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td style={S.td}>
+                          <div style={S.thumbRow}>
+                            {item.articles.map(a => (
+                              <div key={a} style={S.thumb}>
+                                {item.imagePreviews[a] ? (
+                                  <img src={item.imagePreviews[a]} alt={a} style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                                ) : (
+                                  '🖼️'
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td style={S.td}>
+                          <textarea
+                            style={S.notesInput}
+                            rows={2}
+                            placeholder="Notes…"
+                            value={item.notes}
+                            onChange={e => updateNotes(item.itemNumber, e.target.value)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
