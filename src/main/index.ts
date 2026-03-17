@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import ExcelJS from 'exceljs'
+import { imageSize } from 'image-size'
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -232,11 +233,27 @@ ipcMain.handle('export-excel', async (event, items: ExportItem[], outputPath?: s
             const ext = (rawExt === 'jpg' ? 'jpeg' : rawExt) as 'jpeg' | 'png' | 'gif'
             const imageId = wb.addImage({ buffer: buf, extension: ext })
             const col = ai + 2
+
+            // Read actual image dimensions to preserve aspect ratio
+            const dims = imageSize(rawBuf as any)
+            const imgW = dims.width ?? 200
+            const imgH = dims.height ?? 300
+
+            // Target cell size in EMUs (English Metric Units)
+            // Excel column width ~28 chars ≈ 28 * 7px = 196px; row height 180pt ≈ 240px
+            // 1 pixel = 9525 EMU
+            const CELL_W_PX = 196
+            const CELL_H_PX = 240
+            const ratio = Math.min(CELL_W_PX / imgW, CELL_H_PX / imgH)
+            const drawW = Math.round(imgW * ratio * 9525)
+            const drawH = Math.round(imgH * ratio * 9525)
+
+            // Use tl + ext to keep aspect ratio (not tl+br which stretches)
             sheet.addImage(imageId, {
               tl: { col: col + 0.05, row: photoRowIndex + 0.05 } as any,
-              br: { col: col + 0.95, row: photoRowIndex + 0.95 } as any,
+              ext: { width: drawW, height: drawH },
               editAs: 'oneCell',
-            })
+            } as any)
           } catch (_) { /* skip broken image */ }
         }
       }
