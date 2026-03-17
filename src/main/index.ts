@@ -178,11 +178,11 @@ ipcMain.handle('export-excel', async (event, items: ExportItem[], outputPath?: s
     const sheet = wb.addWorksheet('BANNER SELECTION')
 
     const MAX_PHOTOS = Math.max(...items.map(i => i.articles.length), 7)
-    const IMG_ROW_HEIGHT = 90
+    const IMG_ROW_HEIGHT = 180
 
     sheet.getColumn(1).width = 18
     sheet.getColumn(2).width = 48
-    for (let c = 3; c <= MAX_PHOTOS + 2; c++) sheet.getColumn(c).width = 16
+    for (let c = 3; c <= MAX_PHOTOS + 2; c++) sheet.getColumn(c).width = 28
 
     const photoCols = Array.from({ length: MAX_PHOTOS }, (_, i) => `PHOTO ${i + 1}`)
     const headerRow = sheet.addRow(['PHOTO USE', 'TITLES/TAG LINES', ...photoCols])
@@ -204,7 +204,8 @@ ipcMain.handle('export-excel', async (event, items: ExportItem[], outputPath?: s
 
       const tagsText = item.tags.map(t => `- ${t}`).join('\n')
       const photoRow = sheet.addRow([item.itemNumber, tagsText, ...Array(MAX_PHOTOS).fill(null)])
-      photoRow.height = IMG_ROW_HEIGHT
+      const tagsHeight = item.tags.length * 16 + 12
+      photoRow.height = Math.max(IMG_ROW_HEIGHT, tagsHeight)
 
       photoRow.eachCell({ includeEmpty: true }, (cell, cn) => {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: cn === 1 ? BG_LABEL : bg } }
