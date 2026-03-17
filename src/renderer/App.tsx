@@ -41,7 +41,7 @@ function formatBytes(b: number) {
 /* ─── Styles (inline for zero deps) ────────────── */
 const S = {
   root: { display:'flex', flexDirection:'column' as const, height:'100vh', background:'#0f0f11', color:'#f4f4f5', fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif', fontSize:14, overflow:'hidden' },
-  titleBar: { height:38, WebkitAppRegion:'drag' as any, background:'#141417', borderBottom:'1px solid #2a2a30', display:'flex', alignItems:'center', padding:'0 80px 0 16px', flexShrink:0 },
+  titleBar: { height:38, WebkitAppRegion:'drag' as any, background:'#141417', borderBottom:'1px solid #2a2a30', display:'flex', alignItems:'center', padding:'0 16px 0 80px', flexShrink:0 },
   titleText: { fontSize:13, fontWeight:600, color:'#71717a', letterSpacing:'0.4px' },
   body: { flex:1, display:'flex', overflow:'hidden' },
 
@@ -380,7 +380,7 @@ export default function App() {
                   <thead>
                     <tr>
                       <th style={S.th}>#</th>
-                      <th style={S.th}>Tags / Taglines</th>
+                      <th style={{...S.th, width:200, maxWidth:220}}>Tags / Taglines</th>
                       <th style={S.th}>Articles</th>
                       <th style={S.th}>Photos</th>
                       <th style={S.th}>Notes</th>
@@ -390,7 +390,7 @@ export default function App() {
                     {items.map((item, idx) => (
                       <tr key={item.itemNumber} style={S.itemRow(idx % 2 === 1)}>
                         <td style={S.tdNum}>{item.itemNumber}</td>
-                        <td style={S.td}>
+                        <td style={{...S.td, maxWidth:220, width:200}}>
                           {item.tags.length > 0 ? (
                             <div style={{ display:'flex', flexWrap:'wrap' }}>
                               {item.tags.map((t, i) => (

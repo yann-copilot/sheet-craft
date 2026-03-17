@@ -1,6 +1,6 @@
 {
   "name": "photo-organizer",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Automate Excel sheet creation from image directories",
   "main": "dist/main/index.js",
   "scripts": {

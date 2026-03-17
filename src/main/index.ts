@@ -239,14 +239,13 @@ ipcMain.handle('export-excel', async (event, items: ExportItem[], outputPath?: s
             const imgW = dims.width ?? 200
             const imgH = dims.height ?? 300
 
-            // Target cell size in EMUs (English Metric Units)
-            // Excel column width ~28 chars ≈ 28 * 7px = 196px; row height 180pt ≈ 240px
-            // 1 pixel = 9525 EMU
+            // Fit image within cell bounds preserving aspect ratio
+            // Column width 28 chars ≈ 196px; row height 180pt ≈ 240px
             const CELL_W_PX = 196
             const CELL_H_PX = 240
             const ratio = Math.min(CELL_W_PX / imgW, CELL_H_PX / imgH)
-            const drawW = Math.round(imgW * ratio * 9525)
-            const drawH = Math.round(imgH * ratio * 9525)
+            const drawW = Math.round(imgW * ratio)
+            const drawH = Math.round(imgH * ratio)
 
             // Use tl + ext to keep aspect ratio (not tl+br which stretches)
             sheet.addImage(imageId, {
