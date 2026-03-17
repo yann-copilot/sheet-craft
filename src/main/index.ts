@@ -151,12 +151,13 @@ ipcMain.handle('parse-tags-file', async (_e, filePath: string) => {
   }
 })
 
-/* ── Excel export ── */
+/* ── Excel export with embedded images ── */
 interface ExportItem {
   itemNumber: string
   articles: string[]
   notes: string
   tags: string[]
+  imagePaths: Record<string, string>
 }
 
 ipcMain.handle('export-excel', async (event, items: ExportItem[], outputPath?: string) => {
@@ -177,18 +178,19 @@ ipcMain.handle('export-excel', async (event, items: ExportItem[], outputPath?: s
     const sheet = wb.addWorksheet('BANNER SELECTION')
 
     const MAX_PHOTOS = Math.max(...items.map(i => i.articles.length), 7)
+    const IMG_ROW_HEIGHT = 90
+
     sheet.getColumn(1).width = 18
     sheet.getColumn(2).width = 48
-    for (let c = 3; c <= MAX_PHOTOS + 2; c++) sheet.getColumn(c).width = 18
+    for (let c = 3; c <= MAX_PHOTOS + 2; c++) sheet.getColumn(c).width = 16
 
-    // Header row
     const photoCols = Array.from({ length: MAX_PHOTOS }, (_, i) => `PHOTO ${i + 1}`)
     const headerRow = sheet.addRow(['PHOTO USE', 'TITLES/TAG LINES', ...photoCols])
     headerRow.height = 22
     headerRow.eachCell((cell, cn) => {
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' }
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } }
-      cell.alignment = { vertical: 'middle', horizontal: cn === 2 ? 'left' : 'center', wrapText: false }
+      cell.alignment = { vertical: 'middle', horizontal: cn === 2 ? 'left' : 'center' }
       cell.border = { bottom: { style: 'thin', color: { argb: 'FF374151' } }, right: { style: 'thin', color: { argb: 'FF374151' } } }
     })
 
@@ -196,28 +198,49 @@ ipcMain.handle('export-excel', async (event, items: ExportItem[], outputPath?: s
     const BG_B = 'FFF3F4F6'
     const BG_LABEL = 'FFE5E7EB'
 
-    items.forEach((item, idx) => {
+    for (let idx = 0; idx < items.length; idx++) {
+      const item = items[idx]
       const bg = idx % 2 === 0 ? BG_A : BG_B
 
       const tagsText = item.tags.map(t => `- ${t}`).join('\n')
-      const tagsRow = sheet.addRow([item.itemNumber, tagsText, ...item.articles])
-      tagsRow.height = Math.max(40, item.tags.length * 14)
-      tagsRow.eachCell({ includeEmpty: true }, (cell, cn) => {
+      const photoRow = sheet.addRow([item.itemNumber, tagsText, ...Array(MAX_PHOTOS).fill(null)])
+      photoRow.height = IMG_ROW_HEIGHT
+
+      photoRow.eachCell({ includeEmpty: true }, (cell, cn) => {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: cn === 1 ? BG_LABEL : bg } }
-        cell.font = { size: 10, name: 'Calibri', color: { argb: 'FF111827' } }
         cell.border = { top: { style: 'thin', color: { argb: 'FFD1D5DB' } }, bottom: { style: 'hair', color: { argb: 'FFE5E7EB' } }, right: { style: 'thin', color: { argb: 'FFD1D5DB' } } }
         if (cn === 1) {
           cell.font = { bold: true, size: 14, name: 'Calibri', color: { argb: 'FF1F2937' } }
           cell.alignment = { vertical: 'middle', horizontal: 'center' }
         } else if (cn === 2) {
+          cell.font = { size: 10, name: 'Calibri', color: { argb: 'FF374151' } }
           cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true }
-        } else {
-          cell.font = { bold: true, size: 10, name: 'Calibri', color: { argb: 'FF1F2937' } }
-          cell.alignment = { vertical: 'middle', horizontal: 'center' }
         }
       })
 
-      const articleRow = sheet.addRow(['ARTICLE NUMBER', null, ...item.articles])
+      // Embed images
+      const photoRowIndex = photoRow.number - 1
+      for (let ai = 0; ai < item.articles.length; ai++) {
+        const article = item.articles[ai]
+        const imgPath = item.imagePaths?.[article]
+        if (imgPath && fs.existsSync(imgPath)) {
+          try {
+            const rawBuf = fs.readFileSync(imgPath)
+            const buf = Buffer.from(rawBuf) as any
+            const rawExt = path.extname(imgPath).toLowerCase().replace('.', '')
+            const ext = (rawExt === 'jpg' ? 'jpeg' : rawExt) as 'jpeg' | 'png' | 'gif'
+            const imageId = wb.addImage({ buffer: buf, extension: ext })
+            const col = ai + 2
+            sheet.addImage(imageId, {
+              tl: { col: col + 0.05, row: photoRowIndex + 0.05 } as any,
+              br: { col: col + 0.95, row: photoRowIndex + 0.95 } as any,
+              editAs: 'oneCell',
+            })
+          } catch (_) { /* skip broken image */ }
+        }
+      }
+
+      const articleRow = sheet.addRow(['ARTICLE NUMBER', null, ...item.articles, ...Array(MAX_PHOTOS - item.articles.length).fill(null)])
       articleRow.height = 18
       articleRow.eachCell({ includeEmpty: true }, (cell, cn) => {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: cn === 1 ? BG_LABEL : bg } }
@@ -234,7 +257,7 @@ ipcMain.handle('export-excel', async (event, items: ExportItem[], outputPath?: s
         cell.alignment = { vertical: 'middle', horizontal: 'left' }
         cell.border = { bottom: { style: 'medium', color: { argb: 'FFD1D5DB' } }, right: { style: 'thin', color: { argb: 'FFD1D5DB' } } }
       })
-    })
+    }
 
     await wb.xlsx.writeFile(savePath!)
     return { success: true, path: savePath }

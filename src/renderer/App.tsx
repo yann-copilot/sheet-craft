@@ -15,7 +15,8 @@ interface SheetItem {
   articles: string[]
   tags: string[]
   notes: string
-  imagePreviews: Record<string, string>
+  imagePreviews: Record<string, string>  // article → data URL (UI preview)
+  imagePaths: Record<string, string>        // article → file path (Excel embed)
 }
 
 type Step = 'setup' | 'preview' | 'exporting' | 'done'
@@ -127,13 +128,15 @@ export default function App() {
   const [totalSize, setTotalSize] = useState(0)
 
   const buildSheetItems = useCallback((imgs: ImageFile[], groups: Record<number, string[]>): SheetItem[] => {
-    const map: Record<string, { articles: string[]; imagePreviews: Record<string, string> }> = {}
+    const map: Record<string, { articles: string[]; imagePreviews: Record<string, string>; imagePaths: Record<string, string> }> = {}
     for (const img of imgs) {
-      if (!map[img.itemNumber]) map[img.itemNumber] = { articles: [], imagePreviews: {} }
+      if (!map[img.itemNumber]) map[img.itemNumber] = { articles: [], imagePreviews: {}, imagePaths: {} }
       if (!map[img.itemNumber].articles.includes(img.article)) {
         map[img.itemNumber].articles.push(img.article)
       }
       if (img.dataUrl) map[img.itemNumber].imagePreviews[img.article] = img.dataUrl
+      map[img.itemNumber].imagePaths[img.article] = img.path
+      map[img.itemNumber].imagePaths[img.article] = img.path
     }
     return Object.keys(map)
       .sort((a, b) => parseInt(a) - parseInt(b))
@@ -143,6 +146,7 @@ export default function App() {
         tags: groups[parseInt(num)] || [],
         notes: '',
         imagePreviews: map[num].imagePreviews,
+        imagePaths: map[num].imagePaths,
       }))
   }, [])
 
@@ -204,7 +208,7 @@ export default function App() {
           const si = buildSheetItems(images, result.groups)
           return si.map(item => {
             const existing = prev.find(p => p.itemNumber === item.itemNumber)
-            return { ...item, notes: existing?.notes || '' }
+            return { ...item, notes: existing?.notes || '', imagePaths: item.imagePaths }
           })
         })
       }
@@ -231,6 +235,7 @@ export default function App() {
       articles: item.articles,
       tags: item.tags,
       notes: item.notes,
+      imagePaths: item.imagePaths,
     }))
     const result = await window.electronAPI.exportExcel(exportItems)
     if (result.canceled) { setStep('preview'); return }

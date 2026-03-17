@@ -7,6 +7,7 @@ interface ExportItem {
   articles: string[]
   notes: string
   tags: string[]
+  imagePaths: Record<string, string>
 }
 
 interface ElectronAPI {
