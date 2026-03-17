@@ -1,6 +1,6 @@
 {
-  "name": "sheet-craft",
-  "version": "1.3.0",
+  "name": "photo-organizer",
+  "version": "1.4.0",
   "description": "Automate Excel sheet creation from image directories",
   "main": "dist/main/index.js",
   "scripts": {
@@ -33,8 +33,8 @@
     "styled-components": "^6.0.0"
   },
   "build": {
-    "appId": "com.yannbf.sheetcraft",
-    "productName": "SheetCraft",
+    "appId": "com.yannbf.photoorganizer",
+    "productName": "Photo Organizer",
     "directories": {
       "output": "release"
     },
@@ -48,15 +48,7 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         }
       ],
@@ -66,7 +58,7 @@
       "hardenedRuntime": false
     },
     "dmg": {
-      "title": "SheetCraft Installer",
+      "title": "Photo Organizer",
       "contents": [
         {
           "x": 130,

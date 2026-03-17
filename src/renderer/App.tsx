@@ -258,7 +258,7 @@ export default function App() {
   return (
     <div style={S.root}>
       <div style={S.titleBar}>
-        <span style={S.titleText}>SheetCraft</span>
+        <span style={S.titleText}>Photo Organizer</span>
       </div>
       <div style={S.body}>
 
