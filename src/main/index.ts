@@ -204,9 +204,34 @@ ipcMain.handle('export-excel', async (event, items: ExportItem[], outputPath?: s
       const bg = idx % 2 === 0 ? BG_A : BG_B
 
       const tagsText = item.tags.map(t => `- ${t}`).join('\n')
-      const photoRow = sheet.addRow([item.itemNumber, tagsText, ...Array(MAX_PHOTOS).fill(null)])
+
+      // Pre-calculate image sizes so we can set row height correctly before adding images
+      interface ImgData { buf: Buffer; ext: 'jpeg'|'png'|'gif'; drawW: number; drawH: number; col: number }
+      const imgDataList: ImgData[] = []
+      const CELL_W_PX = 196
+      for (let ai = 0; ai < item.articles.length; ai++) {
+        const imgPath = item.imagePaths?.[item.articles[ai]]
+        if (imgPath && fs.existsSync(imgPath)) {
+          try {
+            const rawBuf = fs.readFileSync(imgPath)
+            const dims = imageSize(rawBuf as any)
+            const imgW = dims.width ?? 200
+            const imgH = dims.height ?? 300
+            // No fixed cell height cap — let image dictate row height
+            const ratio = CELL_W_PX / imgW
+            const drawW = Math.round(imgW * ratio)
+            const drawH = Math.round(imgH * ratio)
+            const rawExt = path.extname(imgPath).toLowerCase().replace('.', '')
+            imgDataList.push({ buf: Buffer.from(rawBuf as any) as any, ext: (rawExt === 'jpg' ? 'jpeg' : rawExt) as 'jpeg'|'png'|'gif', drawW, drawH, col: ai + 2 })
+          } catch (_) { /* skip */ }
+        }
+      }
+
+      // Row height = max of all image heights + padding, also ensure tags fit
+      const maxImgH = imgDataList.length > 0 ? Math.max(...imgDataList.map(i => i.drawH)) : 0
       const tagsHeight = item.tags.length * 16 + 12
-      photoRow.height = Math.max(IMG_ROW_HEIGHT, tagsHeight)
+      const photoRow = sheet.addRow([item.itemNumber, tagsText, ...Array(MAX_PHOTOS).fill(null)])
+      photoRow.height = Math.max(IMG_ROW_HEIGHT, maxImgH + 8, tagsHeight)
 
       photoRow.eachCell({ includeEmpty: true }, (cell, cn) => {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: cn === 1 ? BG_LABEL : bg } }
@@ -220,41 +245,17 @@ ipcMain.handle('export-excel', async (event, items: ExportItem[], outputPath?: s
         }
       })
 
-      // Embed images
+      // Embed images (sizes already calculated)
       const photoRowIndex = photoRow.number - 1
-      for (let ai = 0; ai < item.articles.length; ai++) {
-        const article = item.articles[ai]
-        const imgPath = item.imagePaths?.[article]
-        if (imgPath && fs.existsSync(imgPath)) {
-          try {
-            const rawBuf = fs.readFileSync(imgPath)
-            const buf = Buffer.from(rawBuf) as any
-            const rawExt = path.extname(imgPath).toLowerCase().replace('.', '')
-            const ext = (rawExt === 'jpg' ? 'jpeg' : rawExt) as 'jpeg' | 'png' | 'gif'
-            const imageId = wb.addImage({ buffer: buf, extension: ext })
-            const col = ai + 2
-
-            // Read actual image dimensions to preserve aspect ratio
-            const dims = imageSize(rawBuf as any)
-            const imgW = dims.width ?? 200
-            const imgH = dims.height ?? 300
-
-            // Fit image within cell bounds preserving aspect ratio
-            // Column width 28 chars ≈ 196px; row height 180pt ≈ 240px
-            const CELL_W_PX = 196
-            const CELL_H_PX = 240
-            const ratio = Math.min(CELL_W_PX / imgW, CELL_H_PX / imgH)
-            const drawW = Math.round(imgW * ratio)
-            const drawH = Math.round(imgH * ratio)
-
-            // Use tl + ext to keep aspect ratio (not tl+br which stretches)
-            sheet.addImage(imageId, {
-              tl: { col: col + 0.05, row: photoRowIndex + 0.05 } as any,
-              ext: { width: drawW, height: drawH },
-              editAs: 'oneCell',
-            } as any)
-          } catch (_) { /* skip broken image */ }
-        }
+      for (const img of imgDataList) {
+        try {
+          const imageId = wb.addImage({ buffer: img.buf as any, extension: img.ext })
+          sheet.addImage(imageId, {
+            tl: { col: img.col + 0.05, row: photoRowIndex + 0.05 } as any,
+            ext: { width: img.drawW, height: img.drawH },
+            editAs: 'oneCell',
+          } as any)
+        } catch (_) { /* skip */ }
       }
 
       const articleRow = sheet.addRow(['ARTICLE NUMBER', null, ...item.articles, ...Array(MAX_PHOTOS - item.articles.length).fill(null)])
